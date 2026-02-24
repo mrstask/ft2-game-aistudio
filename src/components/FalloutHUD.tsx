@@ -14,6 +14,7 @@ interface FalloutHUDProps {
   mode: 'wander' | 'combat';
   onEndTurn: () => void;
   onCombatToggle: () => void;
+  onInventoryToggle: () => void;
 }
 
 export const FalloutHUD: React.FC<FalloutHUDProps> = ({ 
@@ -22,8 +23,11 @@ export const FalloutHUD: React.FC<FalloutHUDProps> = ({
   turn, 
   mode, 
   onEndTurn, 
-  onCombatToggle 
+  onCombatToggle,
+  onInventoryToggle
 }) => {
+  const equippedWeapon = player.equipment?.weapon;
+
   return (
     <div className="fixed bottom-0 left-0 right-0 h-40 bg-[#2a2a24] border-t-4 border-[#3a3a34] flex items-center px-4 gap-4 z-30 shadow-[0_-10px_30px_rgba(0,0,0,0.8)]">
       {/* Left: Log Screen */}
@@ -47,17 +51,31 @@ export const FalloutHUD: React.FC<FalloutHUDProps> = ({
         <div className="flex gap-8 items-center mt-2">
           {/* INV Button */}
           <div className="flex flex-col gap-1">
-            <button className="w-10 h-6 bg-[#4a1a1a] border border-[#6a2a2a] text-[8px] text-white font-bold rounded shadow-inner hover:bg-[#5a2a2a] transition-colors">INV</button>
+            <button 
+              onClick={onInventoryToggle}
+              className="w-10 h-6 bg-[#4a1a1a] border border-[#6a2a2a] text-[8px] text-white font-bold rounded shadow-inner hover:bg-[#5a2a2a] transition-colors"
+            >
+              INV
+            </button>
             <div className="w-2 h-2 rounded-full bg-red-900 mx-auto shadow-[0_0_5px_rgba(255,0,0,0.5)]" />
           </div>
 
           {/* Weapon Display */}
           <div className="w-48 h-20 bg-black border border-[#4a4a44] rounded flex flex-col items-center justify-center p-1">
-            <div className="text-[#4ade80] font-mono text-[10px] mb-1">10mm PISTOL</div>
-            <div className="w-full h-10 bg-[#1a1a14] flex items-center justify-center">
-              <img src="https://picsum.photos/seed/gun/100/40" alt="weapon" className="opacity-50 grayscale contrast-150" referrerPolicy="no-referrer" />
+            <div className="text-[#4ade80] font-mono text-[10px] mb-1 uppercase">
+              {equippedWeapon ? equippedWeapon.name : 'UNARMED'}
             </div>
-            <div className="text-[#4ade80] font-mono text-[8px] mt-1">SINGLE</div>
+            <div className="w-full h-10 bg-[#1a1a14] flex items-center justify-center">
+              <img 
+                src={equippedWeapon ? `https://picsum.photos/seed/${equippedWeapon.id}/100/40` : "https://picsum.photos/seed/fist/100/40"} 
+                alt="weapon" 
+                className="opacity-50 grayscale contrast-150" 
+                referrerPolicy="no-referrer" 
+              />
+            </div>
+            <div className="text-[#4ade80] font-mono text-[8px] mt-1">
+              {equippedWeapon ? `${equippedWeapon.damage?.min}-${equippedWeapon.damage?.max} DMG` : '1-3 DMG'}
+            </div>
           </div>
 
           {/* AP Display */}
