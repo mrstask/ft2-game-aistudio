@@ -13,7 +13,7 @@ interface InventoryProps {
 
 export const Inventory: React.FC<InventoryProps> = ({ player, onClose, onEquip, onUse, onDrop }) => {
   const inventory = player.inventory || { items: [], maxWeight: 100 };
-  const currentWeight = inventory.items.reduce((sum, item) => sum + item.weight, 0);
+  const currentWeight = inventory.items.reduce((sum, item) => sum + (item.weight * (item.quantity || 1)), 0);
 
   const getIcon = (category: string) => {
     switch (category) {
@@ -93,7 +93,9 @@ export const Inventory: React.FC<InventoryProps> = ({ player, onClose, onEquip, 
                   
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
-                      <h3 className="text-white font-mono font-bold">{item.name}</h3>
+                      <h3 className="text-white font-mono font-bold">
+                        {item.name} {item.quantity && item.quantity > 1 && <span className="text-[#4ade80] ml-1">x{item.quantity}</span>}
+                      </h3>
                       {isEquipped(item) && (
                         <span className="text-[10px] bg-[#4ade80] text-black px-1 font-bold rounded">EQUIPPED</span>
                       )}
@@ -102,8 +104,8 @@ export const Inventory: React.FC<InventoryProps> = ({ player, onClose, onEquip, 
                   </div>
 
                   <div className="text-right font-mono text-xs mr-4">
-                    <div className="text-white">{item.weight} lbs</div>
-                    <div className="text-[#4ade80]">${item.value}</div>
+                    <div className="text-white">{(item.weight * (item.quantity || 1)).toFixed(1)} lbs</div>
+                    <div className="text-[#4ade80]">${item.value * (item.quantity || 1)}</div>
                   </div>
 
                   <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -127,8 +129,9 @@ export const Inventory: React.FC<InventoryProps> = ({ player, onClose, onEquip, 
                     )}
                     <button 
                       onClick={() => onDrop(item)}
-                      className="p-2 border border-[#4a4a44] hover:border-red-500 hover:text-red-500 text-white transition-colors"
-                      title="Drop"
+                      disabled={item.category === 'quest'}
+                      className={`p-2 border border-[#4a4a44] transition-colors ${item.category === 'quest' ? 'opacity-20 cursor-not-allowed' : 'hover:border-red-500 hover:text-red-500 text-white'}`}
+                      title={item.category === 'quest' ? 'Cannot drop quest items' : 'Drop'}
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>

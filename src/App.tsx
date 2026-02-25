@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { GoogleGenAI } from "@google/genai";
 import { GameCanvas } from './components/GameCanvas';
 import { FalloutHUD } from './components/FalloutHUD';
 import { ContextMenu } from './components/ContextMenu';
@@ -6,10 +7,13 @@ import { Inventory } from './components/Inventory';
 import { Entity, GameState, Point, MapObject, Item, WorldItem } from './game/types';
 import { getPath, calculateHitChance, calculateDamage } from './game/engine';
 
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
 const INITIAL_ENTITIES: Entity[] = [
   {
     id: 'player',
     type: 'player',
+    subType: 'vault_dweller',
     gridX: 2,
     gridY: 2,
     hp: 100,
@@ -23,6 +27,7 @@ const INITIAL_ENTITIES: Entity[] = [
   {
     id: 'enemy-1',
     type: 'enemy',
+    subType: 'radroach',
     gridX: 12,
     gridY: 12,
     hp: 40,
@@ -36,6 +41,7 @@ const INITIAL_ENTITIES: Entity[] = [
   {
     id: 'enemy-2',
     type: 'enemy',
+    subType: 'feral_ghoul',
     gridX: 18,
     gridY: 4,
     hp: 60,
@@ -49,6 +55,7 @@ const INITIAL_ENTITIES: Entity[] = [
   {
     id: 'enemy-3',
     type: 'enemy',
+    subType: 'super_mutant',
     gridX: 5,
     gridY: 18,
     hp: 120,
@@ -58,6 +65,20 @@ const INITIAL_ENTITIES: Entity[] = [
     ac: 10,
     name: 'Super Mutant',
     detectionRange: 4,
+  },
+  {
+    id: 'enemy-4',
+    type: 'enemy',
+    subType: 'raider',
+    gridX: 15,
+    gridY: 15,
+    hp: 80,
+    maxHp: 80,
+    ap: 9,
+    maxAp: 9,
+    ac: 5,
+    name: 'Raider',
+    detectionRange: 7,
   },
 ];
 
@@ -94,6 +115,7 @@ const SAMPLE_ITEMS: Item[] = [
     value: 250,
     damage: { min: 5, max: 12 },
     apCost: 5,
+    quantity: 1,
   },
   {
     id: 'leather-armor',
@@ -103,6 +125,7 @@ const SAMPLE_ITEMS: Item[] = [
     weight: 15,
     value: 700,
     acBonus: 10,
+    quantity: 1,
   },
   {
     id: 'stimpak',
@@ -112,6 +135,9 @@ const SAMPLE_ITEMS: Item[] = [
     weight: 0.1,
     value: 100,
     effect: 'heal:30',
+    stackable: true,
+    maxStack: 99,
+    quantity: 1,
   },
   {
     id: 'water-chip',
@@ -120,6 +146,16 @@ const SAMPLE_ITEMS: Item[] = [
     category: 'quest',
     weight: 1,
     value: 0,
+    quantity: 1,
+  },
+  {
+    id: 'brass-key',
+    name: 'Brass Key',
+    description: 'A heavy brass key. Looks like it belongs to a sturdy lock.',
+    category: 'misc',
+    weight: 0.2,
+    value: 10,
+    quantity: 1,
   }
 ];
 
@@ -128,13 +164,19 @@ const INITIAL_WORLD_ITEMS: WorldItem[] = [
     id: 'world-item-1',
     gridX: 5,
     gridY: 5,
-    item: SAMPLE_ITEMS[0],
+    item: { ...SAMPLE_ITEMS[0], quantity: 1 },
   },
   {
     id: 'world-item-2',
     gridX: 8,
     gridY: 8,
-    item: SAMPLE_ITEMS[2],
+    item: { ...SAMPLE_ITEMS[2], quantity: 5 },
+  },
+  {
+    id: 'world-item-3',
+    gridX: 12,
+    gridY: 4,
+    item: { ...SAMPLE_ITEMS[4], quantity: 1 },
   }
 ];
 
@@ -142,7 +184,7 @@ export default function App() {
   const [gameState, setGameState] = useState<GameState>({
     entities: INITIAL_ENTITIES.map(e => e.id === 'player' ? {
       ...e,
-      inventory: { items: [SAMPLE_ITEMS[2]], maxWeight: 150 },
+      inventory: { items: [{ ...SAMPLE_ITEMS[2], quantity: 3 }], maxWeight: 150 },
       equipment: {}
     } : e),
     turn: 'player',
@@ -275,14 +317,28 @@ export default function App() {
           if (!newPlayer.inventory) newPlayer.inventory = { items: [], maxWeight: 150 };
           
           // Check weight
-          const currentWeight = newPlayer.inventory.items.reduce((sum, i) => sum + i.weight, 0);
-          if (currentWeight + worldItem.item.weight > newPlayer.inventory.maxWeight) {
+          const itemWeight = worldItem.item.weight * (worldItem.item.quantity || 1);
+          const currentWeight = newPlayer.inventory.items.reduce((sum, i) => sum + (i.weight * (i.quantity || 1)), 0);
+          if (currentWeight + itemWeight > newPlayer.inventory.maxWeight) {
             addLog("Too heavy to pick up.");
             return prev;
           }
 
-          newPlayer.inventory.items = [...newPlayer.inventory.items, worldItem.item];
-          addLog(`Picked up ${worldItem.item.name}.`);
+          let itemAdded = false;
+          const newItems = newPlayer.inventory.items.map(i => {
+            if (i.id === worldItem.item.id && i.stackable) {
+              itemAdded = true;
+              return { ...i, quantity: (i.quantity || 1) + (worldItem.item.quantity || 1) };
+            }
+            return i;
+          });
+
+          if (!itemAdded) {
+            newItems.push({ ...worldItem.item });
+          }
+          
+          newPlayer.inventory.items = newItems;
+          addLog(`Picked up ${worldItem.item.name}${worldItem.item.quantity && worldItem.item.quantity > 1 ? ` (x${worldItem.item.quantity})` : ''}.`);
           
           return {
             ...prev,
@@ -523,12 +579,17 @@ export default function App() {
           addLog(`Used ${item.name}. Restored ${amount} HP.`);
         }
 
-        // Remove from inventory
+        // Remove from inventory or decrement quantity
         if (newPlayer.inventory) {
           const index = newPlayer.inventory.items.findIndex(i => i.id === item.id);
           if (index > -1) {
+            const targetItem = newPlayer.inventory.items[index];
             const newItems = [...newPlayer.inventory.items];
-            newItems.splice(index, 1);
+            if (targetItem.quantity && targetItem.quantity > 1) {
+              newItems[index] = { ...targetItem, quantity: targetItem.quantity - 1 };
+            } else {
+              newItems.splice(index, 1);
+            }
             newPlayer.inventory = { ...newPlayer.inventory, items: newItems };
           }
         }
@@ -578,6 +639,83 @@ export default function App() {
       });
     }
   };
+
+  const [isGeneratingSkins, setIsGeneratingSkins] = useState(false);
+
+  const generateSkins = useCallback(async () => {
+    if (isGeneratingSkins) return;
+    setIsGeneratingSkins(true);
+
+    const subTypesToGenerate: { subType: string; name: string }[] = [];
+    const seen = new Set<string>();
+
+    gameState.entities.forEach(e => {
+      if (!e.spriteUrl && e.subType && !seen.has(e.subType)) {
+        seen.add(e.subType);
+        subTypesToGenerate.push({ subType: e.subType, name: e.name });
+      }
+    });
+
+    if (subTypesToGenerate.length === 0) {
+      setIsGeneratingSkins(false);
+      return;
+    }
+
+    addLog("Generating enemy skins via Pip-Boy neural link...");
+
+    try {
+      const updatedEntities = [...gameState.entities];
+      
+      for (const { subType, name } of subTypesToGenerate) {
+        if (!subType) continue;
+
+        const prompt = `A retro-style pixel art character sprite for a post-apocalyptic isometric RPG. 
+        Character: ${name}. 
+        Style: 1990s computer game, 256-color palette, gritty, detailed pixel art, Fallout 1 and 2 aesthetic. 
+        View: Isometric perspective from the front-right. 
+        Background: Solid white background (to be removed). 
+        Lighting: Harsh, high-contrast wasteland sun.`;
+        
+        const response = await ai.models.generateContent({
+          model: 'gemini-2.5-flash-image',
+          contents: [{ text: prompt }],
+          config: { imageConfig: { aspectRatio: "1:1" } }
+        });
+
+        let spriteUrl = '';
+        for (const part of response.candidates[0].content.parts) {
+          if (part.inlineData) {
+            spriteUrl = `data:image/png;base64,${part.inlineData.data}`;
+            break;
+          }
+        }
+
+        if (spriteUrl) {
+          updatedEntities.forEach(e => {
+            if (e.subType === subType) {
+              e.spriteUrl = spriteUrl;
+            }
+          });
+        }
+      }
+
+      setGameState(prev => ({ ...prev, entities: updatedEntities }));
+      addLog("Enemy skins synchronized.");
+    } catch (error) {
+      console.error("Skin generation failed:", error);
+      addLog("Neural link error: Skin generation failed.");
+    } finally {
+      setIsGeneratingSkins(false);
+    }
+  }, [gameState.entities, isGeneratingSkins]);
+
+  useEffect(() => {
+    // Automatically generate skins for enemies in view (or just all for now)
+    const hasUnskinned = gameState.entities.some(e => !e.spriteUrl);
+    if (hasUnskinned && !isGeneratingSkins) {
+      generateSkins();
+    }
+  }, [gameState.entities, isGeneratingSkins, generateSkins]);
 
   const handleEndTurn = useCallback(() => {
     setGameState(prev => ({
@@ -698,6 +836,7 @@ export default function App() {
         onEndTurn={handleEndTurn}
         onCombatToggle={startCombat}
         onInventoryToggle={handleInventoryAction.toggle}
+        isGeneratingSkins={isGeneratingSkins}
       />
     </div>
   );

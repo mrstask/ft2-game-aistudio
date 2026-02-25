@@ -15,6 +15,7 @@ interface FalloutHUDProps {
   onEndTurn: () => void;
   onCombatToggle: () => void;
   onInventoryToggle: () => void;
+  isGeneratingSkins?: boolean;
 }
 
 export const FalloutHUD: React.FC<FalloutHUDProps> = ({ 
@@ -24,7 +25,8 @@ export const FalloutHUD: React.FC<FalloutHUDProps> = ({
   mode, 
   onEndTurn, 
   onCombatToggle,
-  onInventoryToggle
+  onInventoryToggle,
+  isGeneratingSkins
 }) => {
   const equippedWeapon = player.equipment?.weapon;
 
@@ -33,6 +35,11 @@ export const FalloutHUD: React.FC<FalloutHUDProps> = ({
       {/* Left: Log Screen */}
       <div className="w-1/4 h-[85%] bg-black border-2 border-[#4a4a44] rounded p-2 relative overflow-hidden">
         <div className="absolute inset-0 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%)] bg-[length:100%_4px] pointer-events-none z-10 opacity-20" />
+        {isGeneratingSkins && (
+          <div className="absolute inset-0 bg-[#4ade80]/10 flex items-center justify-center z-20">
+            <div className="text-[#4ade80] font-mono text-[8px] animate-pulse uppercase">Syncing Neural Link...</div>
+          </div>
+        )}
         <div className="h-full overflow-y-auto font-mono text-[10px] text-[#4ade80] space-y-1 scrollbar-hide">
           {logs.map((log, i) => (
             <div key={i} className="leading-tight">{`> ${log}`}</div>

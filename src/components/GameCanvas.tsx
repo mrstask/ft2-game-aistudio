@@ -18,6 +18,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onTileClick, 
 
   const [canvasSize, setCanvasSize] = useState({ width: 800, height: 600 });
   const visualPositions = useRef<Map<string, { x: number, y: number }>>(new Map());
+  const imageCache = useRef<Map<string, HTMLImageElement>>(new Map());
   
   // Use refs for animation loop to avoid restarting it on every state change
   const gameStateRef = useRef(gameState);
@@ -301,6 +302,36 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onTileClick, 
         const isBack = ['n', 'ne', 'nw'].includes(facing);
         
         if (isLeft) ctx.scale(-1, 1);
+
+        if (entity.spriteUrl) {
+          let img = imageCache.current.get(entity.spriteUrl);
+          if (!img) {
+            img = new Image();
+            img.src = entity.spriteUrl;
+            imageCache.current.set(entity.spriteUrl, img);
+          }
+
+          if (img.complete) {
+            // Draw the sprite
+            const size = 48;
+            ctx.drawImage(img, -size / 2, -size, size, size);
+            
+            // Draw HP bar above sprite
+            ctx.restore();
+            ctx.save();
+            ctx.translate(screen.x, screen.y - size + bob);
+            
+            const hpWidth = 30;
+            const hpHeight = 3;
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+            ctx.fillRect(-hpWidth / 2, -10, hpWidth, hpHeight);
+            ctx.fillStyle = isPlayer ? '#4ade80' : '#ef4444';
+            ctx.fillRect(-hpWidth / 2, -10, hpWidth * (entity.hp / entity.maxHp), hpHeight);
+            
+            ctx.restore();
+            return;
+          }
+        }
 
         if (isPlayer) {
           // Vault Suit (Blue)

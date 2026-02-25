@@ -13,6 +13,10 @@ export interface Item {
   weight: number;
   value: number;
   icon?: string;
+  // Stacking
+  stackable?: boolean;
+  maxStack?: number;
+  quantity?: number;
   // Category specific stats
   damage?: { min: number; max: number };
   acBonus?: number;
@@ -33,6 +37,8 @@ export interface Inventory {
 export interface Entity {
   id: string;
   type: 'player' | 'enemy' | 'npc';
+  subType?: string; // e.g., 'radroach', 'raider', 'super_mutant'
+  spriteUrl?: string;
   gridX: number;
   gridY: number;
   hp: number;
