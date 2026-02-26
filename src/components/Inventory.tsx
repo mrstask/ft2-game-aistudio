@@ -9,9 +9,10 @@ interface InventoryProps {
   onEquip: (item: Item) => void;
   onUse: (item: Item) => void;
   onDrop: (item: Item) => void;
+  onAssignQuickSlot: (item: Item, slotIndex: number) => void;
 }
 
-export const Inventory: React.FC<InventoryProps> = ({ player, onClose, onEquip, onUse, onDrop }) => {
+export const Inventory: React.FC<InventoryProps> = ({ player, onClose, onEquip, onUse, onDrop, onAssignQuickSlot }) => {
   const inventory = player.inventory || { items: [], maxWeight: 100 };
   const currentWeight = inventory.items.reduce((sum, item) => sum + (item.weight * (item.quantity || 1)), 0);
 
@@ -109,6 +110,20 @@ export const Inventory: React.FC<InventoryProps> = ({ player, onClose, onEquip, 
                   </div>
 
                   <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {/* Quick Slot Assignment */}
+                    <div className="flex gap-1 mr-2 border-r border-[#4a4a44] pr-2">
+                      {[0, 1, 2, 3].map(slot => (
+                        <button
+                          key={slot}
+                          onClick={() => onAssignQuickSlot(item, slot)}
+                          className="w-6 h-6 border border-[#4a4a44] hover:border-[#4ade80] hover:text-[#4ade80] text-white text-[8px] flex items-center justify-center transition-colors font-mono"
+                          title={`Assign to Slot ${slot + 1}`}
+                        >
+                          {slot + 1}
+                        </button>
+                      ))}
+                    </div>
+
                     {(item.category === 'weapon' || item.category === 'armor') && (
                       <button 
                         onClick={() => onEquip(item)}

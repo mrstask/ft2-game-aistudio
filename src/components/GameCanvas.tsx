@@ -6,15 +6,19 @@ import { Entity, Point, GameState } from '../game/types';
 interface GameCanvasProps {
   gameState: GameState;
   onTileClick: (point: Point, screenX: number, screenY: number) => void;
+  onTileContextMenu: (point: Point, screenX: number, screenY: number) => void;
   onHover: (point: Point | null) => void;
+  selectedEntityId: string | null;
 }
 
-export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onTileClick, onHover }) => {
+export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onTileClick, onTileContextMenu, onHover, selectedEntityId }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [offset, setOffset] = useState({ x: 400, y: 50 });
+  const [zoom, setZoom] = useState(1);
   const [isDragging, setIsDragging] = useState(false);
   const [lastMousePos, setLastMousePos] = useState({ x: 0, y: 0 });
+  const longPressTimer = useRef<NodeJS.Timeout | null>(null);
 
   const [canvasSize, setCanvasSize] = useState({ width: 800, height: 600 });
   const visualPositions = useRef<Map<string, { x: number, y: number }>>(new Map());
@@ -23,6 +27,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onTileClick, 
   // Use refs for animation loop to avoid restarting it on every state change
   const gameStateRef = useRef(gameState);
   const offsetRef = useRef(offset);
+  const zoomRef = useRef(zoom);
 
   useEffect(() => {
     gameStateRef.current = gameState;
@@ -31,6 +36,10 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onTileClick, 
   useEffect(() => {
     offsetRef.current = offset;
   }, [offset]);
+
+  useEffect(() => {
+    zoomRef.current = zoom;
+  }, [zoom]);
 
   useEffect(() => {
     const updateSize = () => {
@@ -87,6 +96,47 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onTileClick, 
       }
 
       ctx.translate(currentOffset.x, currentOffset.y);
+      ctx.scale(zoomRef.current, zoomRef.current);
+
+      // Draw Detection Range for hovered or selected enemy
+      const hoveredEnemy = state.hoveredTile ? state.entities.find(e => e.gridX === state.hoveredTile?.x && e.gridY === state.hoveredTile?.y && e.type === 'enemy') : null;
+      const selectedEnemy = selectedEntityId ? state.entities.find(e => e.id === selectedEntityId && e.type === 'enemy') : null;
+      const enemyToHighlight = hoveredEnemy || selectedEnemy;
+
+      if (enemyToHighlight && enemyToHighlight.detectionRange) {
+        const range = enemyToHighlight.detectionRange;
+        ctx.save();
+        
+        // Draw a diamond shape representing the Manhattan distance range
+        for (let dx = -range; dx <= range; dx++) {
+          for (let dy = -range; dy <= range; dy++) {
+            if (Math.abs(dx) + Math.abs(dy) <= range) {
+              const tx = enemyToHighlight.gridX + dx;
+              const ty = enemyToHighlight.gridY + dy;
+              
+              if (tx >= 0 && tx < GRID_SIZE && ty >= 0 && ty < GRID_SIZE) {
+                const screen = gridToScreen(tx, ty);
+                ctx.fillStyle = 'rgba(239, 68, 68, 0.15)'; // Reddish semi-transparent
+                ctx.beginPath();
+                ctx.moveTo(screen.x, screen.y);
+                ctx.lineTo(screen.x + TILE_WIDTH / 2, screen.y + TILE_HEIGHT / 2);
+                ctx.lineTo(screen.x, screen.y + TILE_HEIGHT);
+                ctx.lineTo(screen.x - TILE_WIDTH / 2, screen.y + TILE_HEIGHT / 2);
+                ctx.closePath();
+                ctx.fill();
+                
+                // Add a subtle border to the range edge
+                if (Math.abs(dx) + Math.abs(dy) === range) {
+                  ctx.strokeStyle = 'rgba(239, 68, 68, 0.4)';
+                  ctx.lineWidth = 1;
+                  ctx.stroke();
+                }
+              }
+            }
+          }
+        }
+        ctx.restore();
+      }
 
       // Draw Grid
       for (let x = 0; x < GRID_SIZE; x++) {
@@ -296,12 +346,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onTileClick, 
         ctx.save();
         ctx.translate(screen.x + sway, screen.y + TILE_HEIGHT / 2 + bob);
         
-        // Flip based on facing
         const facing = entity.facing || 's';
-        const isLeft = ['e', 'ne', 'se'].includes(facing);
-        const isBack = ['n', 'ne', 'nw'].includes(facing);
-        
-        if (isLeft) ctx.scale(-1, 1);
 
         if (entity.spriteUrl) {
           let img = imageCache.current.get(entity.spriteUrl);
@@ -312,9 +357,37 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onTileClick, 
           }
 
           if (img.complete) {
-            // Draw the sprite
-            const size = 48;
-            ctx.drawImage(img, -size / 2, -size, size, size);
+            // Determine quadrant from facing
+            // 2x2 Grid: [Front, Back]
+            //           [Left, Right]
+            let col = 0;
+            let row = 0;
+            
+            if (['s', 'se', 'sw'].includes(facing)) {
+              col = 0; row = 0; // Front
+            } else if (['n', 'ne', 'nw'].includes(facing)) {
+              col = 1; row = 0; // Back
+            } else if (facing === 'w') {
+              col = 0; row = 1; // Left
+            } else if (facing === 'e') {
+              col = 1; row = 1; // Right
+            }
+
+            const baseSize = 48;
+            const sizeScale = 
+              entity.size === 'small' ? 0.7 :
+              entity.size === 'large' ? 1.5 :
+              entity.size === 'colossal' ? 2.5 : 1.0;
+            
+            const size = baseSize * sizeScale;
+            
+            // Source dimensions (assuming 2x2 grid)
+            const sw = img.width / 2;
+            const sh = img.height / 2;
+            const sx = col * sw;
+            const sy = row * sh;
+
+            ctx.drawImage(img, sx, sy, sw, sh, -size / 2, -size, size, size);
             
             // Draw HP bar above sprite
             ctx.restore();
@@ -332,6 +405,11 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onTileClick, 
             return;
           }
         }
+
+        // Flip based on facing for geometric figures
+        const isLeft = ['e', 'ne', 'se'].includes(facing);
+        const isBack = ['n', 'ne', 'nw'].includes(facing);
+        if (isLeft) ctx.scale(-1, 1);
 
         if (isPlayer) {
           // Vault Suit (Blue)
@@ -481,9 +559,32 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onTileClick, 
       setIsDragging(true);
       setLastMousePos({ x: e.clientX, y: e.clientY });
     }
+
+    // Long press logic for context menu
+    if (e.button === 0) {
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (rect) {
+        const screenX = e.clientX - rect.left;
+        const screenY = e.clientY - rect.top;
+        const x = screenX - offset.x;
+        const y = screenY - offset.y;
+        const grid = screenToGrid(x, y);
+        
+        longPressTimer.current = setTimeout(() => {
+          if (!isDragging) {
+            onTileContextMenu(grid, e.clientX, e.clientY);
+          }
+        }, 500);
+      }
+    }
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+
     if (isDragging) {
       const dx = e.clientX - lastMousePos.x;
       const dy = e.clientY - lastMousePos.y;
@@ -492,8 +593,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onTileClick, 
     } else {
       const rect = canvasRef.current?.getBoundingClientRect();
       if (rect) {
-        const x = e.clientX - rect.left - offset.x;
-        const y = e.clientY - rect.top - offset.y;
+        const x = (e.clientX - rect.left - offset.x) / zoom;
+        const y = (e.clientY - rect.top - offset.y) / zoom;
         const grid = screenToGrid(x, y);
         if (grid.x >= 0 && grid.x < GRID_SIZE && grid.y >= 0 && grid.y < GRID_SIZE) {
           onHover(grid);
@@ -504,7 +605,13 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onTileClick, 
     }
   };
 
-  const handleMouseUp = () => setIsDragging(false);
+  const handleMouseUp = () => {
+    setIsDragging(false);
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
   
   const getCursor = () => {
     if (isDragging) return 'grabbing';
@@ -533,8 +640,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onTileClick, 
     if (rect) {
       const screenX = e.clientX - rect.left;
       const screenY = e.clientY - rect.top;
-      const x = screenX - offset.x;
-      const y = screenY - offset.y;
+      const x = (screenX - offset.x) / zoom;
+      const y = (screenY - offset.y) / zoom;
       const grid = screenToGrid(x, y);
       if (grid.x >= 0 && grid.x < GRID_SIZE && grid.y >= 0 && grid.y < GRID_SIZE) {
         onTileClick(grid, screenX, screenY);
@@ -542,8 +649,34 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onTileClick, 
     }
   };
 
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (rect) {
+      const screenX = e.clientX - rect.left;
+      const screenY = e.clientY - rect.top;
+      const x = (screenX - offset.x) / zoom;
+      const y = (screenY - offset.y) / zoom;
+      const grid = screenToGrid(x, y);
+      if (grid.x >= 0 && grid.x < GRID_SIZE && grid.y >= 0 && grid.y < GRID_SIZE) {
+        onTileContextMenu(grid, e.clientX, e.clientY);
+      }
+    }
+  };
+
+  const handleWheel = (e: React.WheelEvent) => {
+    const zoomStep = 0.1;
+    const newZoom = e.deltaY < 0 
+      ? Math.min(2, zoom + zoomStep) 
+      : Math.max(0.5, zoom - zoomStep);
+    
+    // Optional: Zoom towards mouse position
+    // For now, simple zoom is fine
+    setZoom(newZoom);
+  };
+
   return (
-    <div ref={containerRef} className="w-full h-full">
+    <div ref={containerRef} className="w-full h-full relative">
       <canvas
         ref={canvasRef}
         width={canvasSize.width}
@@ -554,7 +687,42 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onTileClick, 
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onClick={handleClick}
+        onContextMenu={handleContextMenu}
+        onWheel={handleWheel}
       />
+      
+      {/* Zoom Controls */}
+      <div className="absolute top-4 right-4 flex flex-col gap-2 z-20">
+        <button 
+          onClick={() => setZoom(prev => Math.min(2, prev + 0.2))}
+          className="w-10 h-10 bg-[#1a1a1a] border-2 border-[#4a4a44] text-[#4ade80] font-bold hover:bg-[#4a4a44] transition-colors shadow-lg flex items-center justify-center"
+          title="Zoom In"
+        >
+          +
+        </button>
+        <button 
+          onClick={() => setZoom(prev => Math.max(0.5, prev - 0.2))}
+          className="w-10 h-10 bg-[#1a1a1a] border-2 border-[#4a4a44] text-[#4ade80] font-bold hover:bg-[#4a4a44] transition-colors shadow-lg flex items-center justify-center"
+          title="Zoom Out"
+        >
+          -
+        </button>
+        <button 
+          onClick={() => {
+            setZoom(1);
+            setOffset({ x: canvasSize.width / 2, y: 50 });
+          }}
+          className="w-10 h-10 bg-[#1a1a1a] border-2 border-[#4a4a44] text-[#4ade80] text-[10px] font-bold hover:bg-[#4a4a44] transition-colors shadow-lg flex items-center justify-center"
+          title="Reset View"
+        >
+          RST
+        </button>
+      </div>
+      
+      {/* Zoom Indicator */}
+      <div className="absolute bottom-4 right-4 text-[#4ade80]/30 font-mono text-[10px] pointer-events-none">
+        ZOOM: {(zoom * 100).toFixed(0)}%
+      </div>
     </div>
   );
 };

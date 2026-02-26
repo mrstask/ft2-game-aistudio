@@ -37,7 +37,7 @@ export interface Inventory {
 export interface Entity {
   id: string;
   type: 'player' | 'enemy' | 'npc';
-  subType?: string; // e.g., 'radroach', 'raider', 'super_mutant'
+  subType?: string;
   spriteUrl?: string;
   gridX: number;
   gridY: number;
@@ -52,6 +52,15 @@ export interface Entity {
   isMoving?: boolean;
   inventory?: Inventory;
   equipment?: Equipment;
+  // Leveling system
+  level?: number;
+  exp?: number;
+  nextLevelExp?: number;
+  skillPoints?: number;
+  expValue?: number; // XP awarded for defeating this entity
+  movementType?: 'bipedal' | 'quadrupedal' | 'mechanized' | 'crawling';
+  size?: 'small' | 'medium' | 'large' | 'colossal';
+  basePrompt?: string;
 }
 
 export interface VisualEffect {
@@ -76,7 +85,8 @@ export interface MapObject {
 export interface ContextMenuState {
   x: number;
   y: number;
-  objectId: string;
+  objectId?: string;
+  entityId?: string;
 }
 
 export interface WorldItem {
@@ -92,6 +102,7 @@ export interface GameState {
   mode: 'wander' | 'combat';
   logs: string[];
   selectedTile: Point | null;
+  hoveredTile: Point | null;
   path: Point[];
   walls: string[]; // Array of "x,y" strings
   effects: VisualEffect[];
@@ -100,4 +111,8 @@ export interface GameState {
   worldItems: WorldItem[];
   contextMenu: ContextMenuState | null;
   isInventoryOpen: boolean;
+  quickSlots: (Item | null)[];
+  isLevelUpOpen: boolean;
+  devMode: boolean;
+  isSpriteEditorOpen: boolean;
 }

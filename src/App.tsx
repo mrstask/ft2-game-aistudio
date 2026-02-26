@@ -4,6 +4,9 @@ import { GameCanvas } from './components/GameCanvas';
 import { FalloutHUD } from './components/FalloutHUD';
 import { ContextMenu } from './components/ContextMenu';
 import { Inventory } from './components/Inventory';
+import { EntityDetailModal } from './components/EntityDetailModal';
+import { LevelUpModal } from './components/LevelUpModal';
+import { SpriteEditor } from './components/SpriteEditor';
 import { Entity, GameState, Point, MapObject, Item, WorldItem } from './game/types';
 import { getPath, calculateHitChance, calculateDamage } from './game/engine';
 
@@ -23,6 +26,13 @@ const INITIAL_ENTITIES: Entity[] = [
     ac: 5,
     name: 'Vault Dweller',
     facing: 's',
+    level: 1,
+    exp: 0,
+    nextLevelExp: 1000,
+    skillPoints: 0,
+    movementType: 'bipedal',
+    size: 'medium',
+    basePrompt: 'A vault dweller in a blue and yellow jumpsuit, carrying a small pack.',
   },
   {
     id: 'enemy-1',
@@ -37,6 +47,10 @@ const INITIAL_ENTITIES: Entity[] = [
     ac: 2,
     name: 'Radroach',
     detectionRange: 5,
+    expValue: 250,
+    movementType: 'quadrupedal',
+    size: 'small',
+    basePrompt: 'A giant, mutated cockroach with glowing green patches.',
   },
   {
     id: 'enemy-2',
@@ -51,6 +65,10 @@ const INITIAL_ENTITIES: Entity[] = [
     ac: 3,
     name: 'Feral Ghoul',
     detectionRange: 6,
+    expValue: 500,
+    movementType: 'bipedal',
+    size: 'medium',
+    basePrompt: 'A decaying, irradiated humanoid with tattered clothing and glowing eyes.',
   },
   {
     id: 'enemy-3',
@@ -65,6 +83,10 @@ const INITIAL_ENTITIES: Entity[] = [
     ac: 10,
     name: 'Super Mutant',
     detectionRange: 4,
+    expValue: 1500,
+    movementType: 'bipedal',
+    size: 'large',
+    basePrompt: 'A massive, green-skinned brute wearing scrap metal armor and carrying a heavy pipe.',
   },
   {
     id: 'enemy-4',
@@ -79,6 +101,10 @@ const INITIAL_ENTITIES: Entity[] = [
     ac: 5,
     name: 'Raider',
     detectionRange: 7,
+    expValue: 750,
+    movementType: 'bipedal',
+    size: 'medium',
+    basePrompt: 'A wasteland survivor wearing spikes and leather, with a mohawk and face paint.',
   },
 ];
 
@@ -191,6 +217,7 @@ export default function App() {
     mode: 'wander',
     logs: ['Welcome to the Wasteland.', 'Wander mode active.', 'Use Arrow Keys or Alt+Drag to move the camera.'],
     selectedTile: null,
+    hoveredTile: null,
     path: [],
     walls: INITIAL_WALLS,
     effects: [],
@@ -199,6 +226,10 @@ export default function App() {
     worldItems: INITIAL_WORLD_ITEMS,
     contextMenu: null,
     isInventoryOpen: false,
+    quickSlots: [null, null, null, null],
+    isLevelUpOpen: false,
+    devMode: false,
+    isSpriteEditorOpen: false,
   });
   const [walkingPath, setWalkingPath] = useState<Point[]>([]);
 
@@ -210,12 +241,53 @@ export default function App() {
       .map(obj => `${obj.gridX},${obj.gridY}`)
   ]);
 
-  const addLog = (msg: string) => {
+  const addLog = useCallback((msg: string) => {
     setGameState(prev => ({
       ...prev,
       logs: [msg, ...prev.logs].slice(0, 50),
     }));
-  };
+  }, []);
+
+  const awardExp = useCallback((amount: number) => {
+    setGameState(prev => {
+      const player = prev.entities.find(e => e.id === 'player')!;
+      let newExp = (player.exp || 0) + amount;
+      let newLevel = player.level || 1;
+      let newNextLevelExp = player.nextLevelExp || 1000;
+      let newSkillPoints = player.skillPoints || 0;
+      let leveledUp = false;
+
+      while (newExp >= newNextLevelExp) {
+        leveledUp = true;
+        newLevel++;
+        newSkillPoints += 3; // 3 points per level
+        newNextLevelExp = newLevel * (newLevel - 1) * 500;
+      }
+
+      const updatedEntities = prev.entities.map(e => {
+        if (e.id === 'player') {
+          return {
+            ...e,
+            exp: newExp,
+            level: newLevel,
+            nextLevelExp: newNextLevelExp,
+            skillPoints: newSkillPoints
+          };
+        }
+        return e;
+      });
+
+      if (leveledUp) {
+        addLog(`LEVEL UP! You are now level ${newLevel}.`);
+      }
+
+      return {
+        ...prev,
+        entities: updatedEntities,
+        isLevelUpOpen: leveledUp ? true : prev.isLevelUpOpen
+      };
+    });
+  }, [addLog]);
 
   const triggerEffect = (type: 'impact' | 'miss', x: number, y: number) => {
     const id = Math.random().toString(36).substr(2, 9);
@@ -303,8 +375,77 @@ export default function App() {
     setWalkingPath([]); // Stop walking when combat starts
   }, []);
 
+  const handleAttack = useCallback((targetId: string) => {
+    setGameState(prev => {
+      const player = prev.entities.find(e => e.id === 'player')!;
+      const target = prev.entities.find(e => e.id === targetId);
+      
+      if (!target || target.type !== 'enemy') return prev;
+      if (prev.turn !== 'player') return prev;
+
+      const dist = Math.abs(player.gridX - target.gridX) + Math.abs(player.gridY - target.gridY);
+      const weapon = player.equipment?.weapon;
+      const apCost = weapon?.apCost || 4;
+      const damageRange = weapon?.damage || { min: 1, max: 3 };
+
+      if (dist > 1) {
+        addLog('Too far to attack!');
+        return prev;
+      }
+
+      if (player.ap < apCost) {
+        addLog('Not enough AP to attack!');
+        return prev;
+      }
+
+      const toHit = calculateHitChance(player.ap, target.ac);
+      const roll = Math.floor(Math.random() * 100);
+      
+      if (roll <= toHit) {
+        const damage = calculateDamage(damageRange.min, damageRange.max);
+        addLog(`You hit ${target.name} for ${damage} damage!`);
+        triggerEffect('impact', target.gridX, target.gridY);
+        
+        const nextEntities = prev.entities.map(e => {
+          if (e.id === 'player') return { ...e, ap: e.ap - apCost };
+          if (e.id === target.id) return { ...e, hp: Math.max(0, e.hp - damage) };
+          return e;
+        }).filter(e => e.hp > 0);
+
+        const targetDied = !nextEntities.some(e => e.id === target.id);
+        if (targetDied && target.expValue) {
+          setTimeout(() => awardExp(target.expValue!), 500);
+        }
+
+        const enemiesLeft = nextEntities.some(e => e.type === 'enemy');
+        return {
+          ...prev,
+          entities: nextEntities,
+          mode: enemiesLeft ? 'combat' : 'wander',
+          logs: enemiesLeft ? prev.logs : ['All hostiles eliminated. Wander mode active.', ...prev.logs].slice(0, 50),
+        };
+      } else {
+        addLog(`You missed ${target.name}!`);
+        triggerEffect('miss', target.gridX, target.gridY);
+        return {
+          ...prev,
+          entities: prev.entities.map(e => e.id === 'player' ? { ...e, ap: e.ap - apCost } : e)
+        };
+      }
+    });
+  }, [addLog]);
+
   const handleTileClick = (point: Point, screenX: number, screenY: number) => {
     if (walkingPath.length > 0) return; // Ignore clicks while walking
+
+    // Developer Mode: Click on entity to open profile
+    if (gameState.devMode) {
+      const entityAtTile = gameState.entities.find(e => e.gridX === point.x && e.gridY === point.y);
+      if (entityAtTile) {
+        setSelectedEntityId(entityAtTile.id);
+        return;
+      }
+    }
 
     // Check if clicking a world item
     const worldItem = gameState.worldItems.find(wi => wi.gridX === point.x && wi.gridY === point.y);
@@ -367,7 +508,22 @@ export default function App() {
       setGameState(prev => ({ ...prev, contextMenu: null }));
     }
 
-    // Check if clicking an enemy
+    // Check if clicking an entity (player or enemy)
+    const clickedEntity = gameState.entities.find(e => e.gridX === point.x && e.gridY === point.y);
+    
+    // Always open modal for player
+    if (clickedEntity?.id === 'player') {
+      setSelectedEntityId(clickedEntity.id);
+      return;
+    }
+
+    // Open modal for enemy in wander mode
+    if (clickedEntity?.type === 'enemy' && gameState.mode === 'wander') {
+      setSelectedEntityId(clickedEntity.id);
+      return;
+    }
+
+    // Check if clicking an enemy for combat
     const enemy = gameState.entities.find(e => e.gridX === point.x && e.gridY === point.y && e.type === 'enemy');
     
     if (enemy) {
@@ -378,52 +534,7 @@ export default function App() {
 
       if (gameState.turn !== 'player') return;
 
-      // Combat logic
-      const dist = Math.abs(player.gridX - enemy.gridX) + Math.abs(player.gridY - enemy.gridY);
-      const weapon = player.equipment?.weapon;
-      const apCost = weapon?.apCost || 4;
-      const damageRange = weapon?.damage || { min: 1, max: 3 };
-
-      if (dist <= 1) {
-        if (player.ap >= apCost) {
-          const toHit = calculateHitChance(player.ap, enemy.ac);
-          const roll = Math.floor(Math.random() * 100);
-          
-          if (roll <= toHit) {
-            const damage = calculateDamage(damageRange.min, damageRange.max);
-            addLog(`You hit ${enemy.name} for ${damage} damage!`);
-            triggerEffect('impact', enemy.gridX, enemy.gridY);
-            
-            setGameState(prev => {
-              const nextEntities = prev.entities.map(e => {
-                if (e.id === 'player') return { ...e, ap: e.ap - apCost };
-                if (e.id === enemy.id) return { ...e, hp: Math.max(0, e.hp - damage) };
-                return e;
-              }).filter(e => e.hp > 0);
-
-              // Check if combat should end
-              const enemiesLeft = nextEntities.some(e => e.type === 'enemy');
-              return {
-                ...prev,
-                entities: nextEntities,
-                mode: enemiesLeft ? 'combat' : 'wander',
-                logs: enemiesLeft ? prev.logs : ['All hostiles eliminated. Wander mode active.', ...prev.logs].slice(0, 50),
-              };
-            });
-          } else {
-            addLog(`You missed ${enemy.name}!`);
-            triggerEffect('miss', enemy.gridX, enemy.gridY);
-            setGameState(prev => ({
-              ...prev,
-              entities: prev.entities.map(e => e.id === 'player' ? { ...e, ap: e.ap - 4 } : e)
-            }));
-          }
-        } else {
-          addLog('Not enough AP to attack!');
-        }
-      } else {
-        addLog('Too far to attack!');
-      }
+      handleAttack(enemy.id);
       return;
     }
 
@@ -477,12 +588,39 @@ export default function App() {
 
   const handleHover = (point: Point | null) => {
     if (!point) {
-      setGameState(prev => ({ ...prev, selectedTile: null, path: [] }));
+      setGameState(prev => ({ ...prev, hoveredTile: null, path: [] }));
       return;
     }
 
     const path = getPath({ x: player.gridX, y: player.gridY }, point, obstacles);
-    setGameState(prev => ({ ...prev, selectedTile: point, path }));
+    setGameState(prev => ({ ...prev, hoveredTile: point, path }));
+  };
+
+  const handleTileContextMenu = (point: Point, screenX: number, screenY: number) => {
+    // Check if clicking an entity
+    const entity = gameState.entities.find(e => e.gridX === point.x && e.gridY === point.y);
+    if (entity) {
+      setGameState(prev => ({
+        ...prev,
+        contextMenu: { x: screenX, y: screenY, entityId: entity.id }
+      }));
+      return;
+    }
+
+    // Check if clicking an object
+    const object = gameState.objects.find(obj => obj.gridX === point.x && obj.gridY === point.y);
+    if (object) {
+      setGameState(prev => ({
+        ...prev,
+        contextMenu: { x: screenX, y: screenY, objectId: object.id }
+      }));
+      return;
+    }
+
+    // Close context menu if clicking empty tile
+    if (gameState.contextMenu) {
+      setGameState(prev => ({ ...prev, contextMenu: null }));
+    }
   };
 
   const handleDoorAction = (action: 'toggle' | 'lock' | 'picklock') => {
@@ -580,23 +718,37 @@ export default function App() {
         }
 
         // Remove from inventory or decrement quantity
+        let itemStillExists = true;
+        let updatedItem: Item | null = null;
+
         if (newPlayer.inventory) {
           const index = newPlayer.inventory.items.findIndex(i => i.id === item.id);
           if (index > -1) {
             const targetItem = newPlayer.inventory.items[index];
             const newItems = [...newPlayer.inventory.items];
             if (targetItem.quantity && targetItem.quantity > 1) {
-              newItems[index] = { ...targetItem, quantity: targetItem.quantity - 1 };
+              updatedItem = { ...targetItem, quantity: targetItem.quantity - 1 };
+              newItems[index] = updatedItem;
             } else {
               newItems.splice(index, 1);
+              itemStillExists = false;
             }
             newPlayer.inventory = { ...newPlayer.inventory, items: newItems };
           }
         }
 
+        // Update quick slots
+        const newQuickSlots = prev.quickSlots.map(qs => {
+          if (qs?.id === item.id) {
+            return itemStillExists ? updatedItem : null;
+          }
+          return qs;
+        });
+
         return {
           ...prev,
-          entities: prev.entities.map(e => e.id === 'player' ? newPlayer : e)
+          entities: prev.entities.map(e => e.id === 'player' ? newPlayer : e),
+          quickSlots: newQuickSlots
         };
       });
     },
@@ -631,91 +783,177 @@ export default function App() {
 
         addLog(`Dropped ${item.name}.`);
 
+        // Remove from quick slots
+        const newQuickSlots = prev.quickSlots.map(qs => qs?.id === item.id ? null : qs);
+
         return {
           ...prev,
           entities: prev.entities.map(e => e.id === 'player' ? newPlayer : e),
-          worldItems: [...prev.worldItems, newWorldItem]
+          worldItems: [...prev.worldItems, newWorldItem],
+          quickSlots: newQuickSlots
         };
+      });
+    },
+    assignQuickSlot: (item: Item, slotIndex: number) => {
+      setGameState(prev => {
+        const newQuickSlots = [...prev.quickSlots];
+        newQuickSlots[slotIndex] = item;
+        addLog(`Assigned ${item.name} to Quick Slot ${slotIndex + 1}.`);
+        return { ...prev, quickSlots: newQuickSlots };
       });
     }
   };
 
-  const [isGeneratingSkins, setIsGeneratingSkins] = useState(false);
+  const handleQuickSlotUse = (index: number) => {
+    const item = gameState.quickSlots[index];
+    if (!item) return;
 
-  const generateSkins = useCallback(async () => {
+    if (item.category === 'weapon' || item.category === 'armor') {
+      handleInventoryAction.equip(item);
+    } else if (item.category === 'chem') {
+      handleInventoryAction.use(item);
+    } else {
+      addLog(`Cannot use ${item.name} from quick slot.`);
+    }
+  };
+
+  const [isGeneratingSkins, setIsGeneratingSkins] = useState(false);
+  const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
+
+  const handleLevelUpApply = (updates: Partial<Entity>) => {
+    setGameState(prev => ({
+      ...prev,
+      entities: prev.entities.map(e => e.id === 'player' ? { ...e, ...updates } : e),
+      isLevelUpOpen: false
+    }));
+    addLog("Training complete. Your abilities have improved.");
+  };
+
+  const toggleDevMode = () => {
+    setGameState(prev => {
+      const newDevMode = !prev.devMode;
+      addLog(newDevMode ? "DEVELOPER MODE ENABLED" : "DEVELOPER MODE DISABLED");
+      return { ...prev, devMode: newDevMode, isSpriteEditorOpen: false };
+    });
+  };
+
+  const toggleSpriteEditor = () => {
+    setGameState(prev => ({ ...prev, isSpriteEditorOpen: !prev.isSpriteEditorOpen }));
+  };
+
+  const handleUpdateSprite = (entityId: string, spriteUrl: string) => {
+    setGameState(prev => ({
+      ...prev,
+      entities: prev.entities.map(e => e.id === entityId ? { ...e, spriteUrl } : e)
+    }));
+  };
+
+  const handleUpdateEntity = (entityId: string, updates: Partial<Entity>) => {
+    setGameState(prev => ({
+      ...prev,
+      entities: prev.entities.map(e => e.id === entityId ? { ...e, ...updates } : e)
+    }));
+  };
+
+  const removeWhiteBackground = async (base64Data: string): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(base64Data.startsWith('data:') ? base64Data : `data:image/png;base64,${base64Data}`);
+          return;
+        }
+        ctx.drawImage(img, 0, 0);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+        
+        // Target white background
+        const threshold = 240; 
+        for (let i = 0; i < data.length; i += 4) {
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
+          // If pixel is near white, make it transparent
+          if (r > threshold && g > threshold && b > threshold) {
+            data[i + 3] = 0;
+          }
+        }
+        ctx.putImageData(imageData, 0, 0);
+        resolve(canvas.toDataURL('image/png'));
+      };
+      img.onerror = () => resolve(base64Data.startsWith('data:') ? base64Data : `data:image/png;base64,${base64Data}`);
+      img.src = base64Data.startsWith('data:') ? base64Data : `data:image/png;base64,${base64Data}`;
+    });
+  };
+
+  const generateSkins = useCallback(async (targetEntityId?: string) => {
     if (isGeneratingSkins) return;
     setIsGeneratingSkins(true);
 
-    const subTypesToGenerate: { subType: string; name: string }[] = [];
-    const seen = new Set<string>();
+    const entitiesToUpdate = targetEntityId 
+      ? [gameState.entities.find(e => e.id === targetEntityId)].filter(Boolean) as Entity[]
+      : []; // No automatic generation
 
-    gameState.entities.forEach(e => {
-      if (!e.spriteUrl && e.subType && !seen.has(e.subType)) {
-        seen.add(e.subType);
-        subTypesToGenerate.push({ subType: e.subType, name: e.name });
-      }
-    });
-
-    if (subTypesToGenerate.length === 0) {
+    if (entitiesToUpdate.length === 0) {
       setIsGeneratingSkins(false);
       return;
     }
 
-    addLog("Generating enemy skins via Pip-Boy neural link...");
+    addLog(`Pip-Boy: Recalibrating neural link for ${entitiesToUpdate[0].name}...`);
 
     try {
-      const updatedEntities = [...gameState.entities];
-      
-      for (const { subType, name } of subTypesToGenerate) {
-        if (!subType) continue;
+      const entity = entitiesToUpdate[0];
+      const prompt = `Isometric 2D character sprite sheet for a post-apocalyptic RPG. 
+      Subject: ${entity.name} - ${entity.basePrompt || entity.subType}.
+      Locomotion: ${entity.movementType || 'bipedal'}.
+      Format: 4 cardinal directions (Front, Back, Left, Right) arranged in a 2x2 grid.
+      Style: Gritty 90s pixel art, Fallout 1 aesthetic, high contrast, sharp edges.
+      Background: SOLID PURE WHITE BACKGROUND. NO LANDSCAPE. NO SEA. NO ROCKS. JUST THE CHARACTER ON WHITE.
+      The character should be centered in each quadrant.`;
 
-        const prompt = `A retro-style pixel art character sprite for a post-apocalyptic isometric RPG. 
-        Character: ${name}. 
-        Style: 1990s computer game, 256-color palette, gritty, detailed pixel art, Fallout 1 and 2 aesthetic. 
-        View: Isometric perspective from the front-right. 
-        Background: Solid white background (to be removed). 
-        Lighting: Harsh, high-contrast wasteland sun.`;
-        
-        const response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash-image',
-          contents: [{ text: prompt }],
-          config: { imageConfig: { aspectRatio: "1:1" } }
-        });
-
-        let spriteUrl = '';
-        for (const part of response.candidates[0].content.parts) {
-          if (part.inlineData) {
-            spriteUrl = `data:image/png;base64,${part.inlineData.data}`;
-            break;
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash-image',
+        contents: [{ parts: [{ text: prompt }] }],
+        config: {
+          imageConfig: {
+            aspectRatio: "1:1",
           }
         }
+      });
 
-        if (spriteUrl) {
-          updatedEntities.forEach(e => {
-            if (e.subType === subType) {
-              e.spriteUrl = spriteUrl;
-            }
-          });
+      let base64Image = '';
+      for (const part of response.candidates?.[0]?.content?.parts || []) {
+        if (part.inlineData) {
+          base64Image = part.inlineData.data;
+          break;
         }
       }
 
-      setGameState(prev => ({ ...prev, entities: updatedEntities }));
-      addLog("Enemy skins synchronized.");
+      if (!base64Image) {
+        throw new Error("No image data received from model");
+      }
+
+      // Process image to remove white background
+      const transparentSpriteUrl = await removeWhiteBackground(base64Image);
+
+      setGameState(prev => ({
+        ...prev,
+        entities: prev.entities.map(e => e.id === entity.id ? { ...e, spriteUrl: transparentSpriteUrl } : e)
+      }));
+
+      addLog("Pip-Boy: Visualization data synchronized.");
     } catch (error) {
       console.error("Skin generation failed:", error);
-      addLog("Neural link error: Skin generation failed.");
+      addLog("Pip-Boy Error: Neural link synchronization failed.");
     } finally {
       setIsGeneratingSkins(false);
     }
-  }, [gameState.entities, isGeneratingSkins]);
-
-  useEffect(() => {
-    // Automatically generate skins for enemies in view (or just all for now)
-    const hasUnskinned = gameState.entities.some(e => !e.spriteUrl);
-    if (hasUnskinned && !isGeneratingSkins) {
-      generateSkins();
-    }
-  }, [gameState.entities, isGeneratingSkins, generateSkins]);
+  }, [gameState.entities, isGeneratingSkins, addLog]);
 
   const handleEndTurn = useCallback(() => {
     setGameState(prev => ({
@@ -792,7 +1030,9 @@ export default function App() {
         <GameCanvas 
           gameState={gameState} 
           onTileClick={handleTileClick}
+          onTileContextMenu={handleTileContextMenu}
           onHover={handleHover}
+          selectedEntityId={selectedEntityId}
         />
       </div>
       
@@ -812,8 +1052,64 @@ export default function App() {
         <ContextMenu 
           x={gameState.contextMenu.x}
           y={gameState.contextMenu.y}
-          object={gameState.objects.find(o => o.id === gameState.contextMenu!.objectId)!}
-          onAction={handleDoorAction}
+          title={
+            gameState.contextMenu.objectId 
+              ? gameState.objects.find(o => o.id === gameState.contextMenu!.objectId)?.name || 'Object'
+              : gameState.entities.find(e => e.id === gameState.contextMenu!.entityId)?.name || 'Entity'
+          }
+          actions={
+            gameState.contextMenu.objectId 
+              ? (() => {
+                  const obj = gameState.objects.find(o => o.id === gameState.contextMenu!.objectId)!;
+                  return [
+                    {
+                      label: obj.isOpen ? 'Close' : 'Open',
+                      shortcut: 'O',
+                      onClick: () => handleDoorAction('toggle')
+                    },
+                    {
+                      label: obj.isLocked ? 'Unlock' : 'Lock',
+                      shortcut: 'L',
+                      onClick: () => handleDoorAction('lock')
+                    },
+                    ...(obj.isLocked && !obj.isOpen ? [{
+                      label: 'Pick Lock',
+                      shortcut: 'P',
+                      onClick: () => handleDoorAction('picklock')
+                    }] : [])
+                  ];
+                })()
+              : (() => {
+                  const entity = gameState.entities.find(e => e.id === gameState.contextMenu!.entityId)!;
+                  const isPlayer = entity.id === 'player';
+                  const isEnemy = entity.type === 'enemy';
+                  
+                  return [
+                    {
+                      label: 'Inspect',
+                      shortcut: 'I',
+                      onClick: () => setSelectedEntityId(entity.id)
+                    },
+                    ...(isEnemy ? [{
+                      label: 'Attack',
+                      shortcut: 'A',
+                      onClick: () => handleAttack(entity.id),
+                      disabled: gameState.turn !== 'player' || player.ap < (player.equipment?.weapon?.apCost || 4),
+                      variant: 'danger' as const
+                    }] : []),
+                    ...(isPlayer ? [{
+                      label: 'Inventory',
+                      shortcut: 'B',
+                      onClick: () => handleInventoryAction.toggle()
+                    }] : []),
+                    {
+                      label: 'Regen Visuals',
+                      shortcut: 'R',
+                      onClick: () => generateSkins(entity.id)
+                    }
+                  ];
+                })()
+          }
           onClose={() => setGameState(prev => ({ ...prev, contextMenu: null }))}
         />
       )}
@@ -825,6 +1121,15 @@ export default function App() {
           onEquip={handleInventoryAction.equip}
           onUse={handleInventoryAction.use}
           onDrop={handleInventoryAction.drop}
+          onAssignQuickSlot={handleInventoryAction.assignQuickSlot}
+        />
+      )}
+
+      {gameState.isLevelUpOpen && (
+        <LevelUpModal 
+          player={player}
+          onClose={() => setGameState(prev => ({ ...prev, isLevelUpOpen: false }))}
+          onApply={handleLevelUpApply}
         />
       )}
 
@@ -836,8 +1141,38 @@ export default function App() {
         onEndTurn={handleEndTurn}
         onCombatToggle={startCombat}
         onInventoryToggle={handleInventoryAction.toggle}
+        quickSlots={gameState.quickSlots}
+        onQuickSlotUse={handleQuickSlotUse}
         isGeneratingSkins={isGeneratingSkins}
+        devMode={gameState.devMode}
+        onDevModeToggle={toggleDevMode}
+        onSpriteEditorToggle={toggleSpriteEditor}
       />
+
+      {gameState.isSpriteEditorOpen && (
+        <SpriteEditor 
+          entities={gameState.entities}
+          onClose={toggleSpriteEditor}
+          onUpdateSprite={handleUpdateSprite}
+          onRegenerate={generateSkins}
+          isGenerating={isGeneratingSkins}
+        />
+      )}
+
+      {selectedEntityId && (
+        <EntityDetailModal 
+          entity={gameState.entities.find(e => e.id === selectedEntityId)!}
+          onClose={() => setSelectedEntityId(null)}
+          onRegenerate={(id) => generateSkins(id)}
+          isGenerating={isGeneratingSkins}
+          mode={gameState.mode}
+          onStartCombat={startCombat}
+          onAttack={handleAttack}
+          canAttack={player.ap >= (player.equipment?.weapon?.apCost || 4)}
+          devMode={gameState.devMode}
+          onUpdateEntity={handleUpdateEntity}
+        />
+      )}
     </div>
   );
 }
