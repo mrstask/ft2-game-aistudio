@@ -1,5 +1,5 @@
 import React from 'react';
-import { Entity } from '../game/types';
+import { Entity } from '../../../game/types';
 import { X, RefreshCw, Image as ImageIcon, Search, User, Shield, Zap, Heart } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 

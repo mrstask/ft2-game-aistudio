@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { TILE_WIDTH, TILE_HEIGHT, GRID_SIZE, COLORS } from '../game/constants';
 import { gridToScreen, screenToGrid, getPath } from '../game/engine';
+import { getDirectionalSpriteCell, getPlayerPose } from '../game/animation';
 import { Entity, Point, GameState } from '../game/types';
 
 interface GameCanvasProps {
@@ -339,9 +340,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onTileClick, 
         const isPlayer = entity.type === 'player';
         const time = Date.now() / 1000;
         
-        // Animation values
-        const bob = entity.isMoving ? Math.sin(time * 15) * 3 : Math.sin(time * 2) * 1;
-        const sway = entity.isMoving ? Math.cos(time * 15) * 2 : 0;
+        const playerPose = isPlayer ? getPlayerPose(entity, time) : null;
+        const bob = playerPose?.bob ?? (entity.isMoving ? Math.sin(time * 15) * 3 : Math.sin(time * 2) * 1);
+        const sway = playerPose?.sway ?? (entity.isMoving ? Math.cos(time * 15) * 2 : 0);
         
         ctx.save();
         ctx.translate(screen.x + sway, screen.y + TILE_HEIGHT / 2 + bob);
@@ -357,21 +358,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onTileClick, 
           }
 
           if (img.complete) {
-            // Determine quadrant from facing
-            // 2x2 Grid: [Front, Back]
-            //           [Left, Right]
-            let col = 0;
-            let row = 0;
-            
-            if (['s', 'se', 'sw'].includes(facing)) {
-              col = 0; row = 0; // Front
-            } else if (['n', 'ne', 'nw'].includes(facing)) {
-              col = 1; row = 0; // Back
-            } else if (facing === 'w') {
-              col = 0; row = 1; // Left
-            } else if (facing === 'e') {
-              col = 1; row = 1; // Right
-            }
+            const { col, row } = getDirectionalSpriteCell(facing);
 
             const baseSize = 48;
             const sizeScale = 
@@ -412,65 +399,121 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onTileClick, 
         if (isLeft) ctx.scale(-1, 1);
 
         if (isPlayer) {
-          // Vault Suit (Blue)
-          ctx.fillStyle = '#1e3a8a'; // Dark blue
+          const pose = playerPose || getPlayerPose(entity, time);
+          ctx.rotate(pose.torsoTilt);
+          ctx.scale(pose.bodyScaleX, 1);
+          const armorDark = '#4a4f53';
+          const armorMid = '#7a8086';
+          const armorLight = '#b4bcc1';
+          const armorJoint = '#2a2f34';
+          const visorGlow = '#b8f85f';
           
           // Legs
-          ctx.fillRect(-6, 0, 4, 12);
-          ctx.fillRect(2, 0, 4, 12);
+          const leftLegY = 0 + Math.max(0, pose.leftLegLift);
+          const rightLegY = 0 + Math.max(0, pose.rightLegLift);
+          const leftLegHeight = 12 + Math.max(0, pose.rightLegLift) * 0.5;
+          const rightLegHeight = 12 + Math.max(0, pose.leftLegLift) * 0.5;
+          ctx.fillStyle = armorJoint;
+          ctx.fillRect(-7 - pose.hipOffsetX, leftLegY + 1, 5 * pose.strideCompressX, leftLegHeight);
+          ctx.fillRect(2 + pose.hipOffsetX, rightLegY + 1, 5 * pose.strideCompressX, rightLegHeight);
+          ctx.fillStyle = armorMid;
+          ctx.fillRect(-7 - pose.hipOffsetX, leftLegY, 5 * pose.strideCompressX, 6);
+          ctx.fillRect(2 + pose.hipOffsetX, rightLegY, 5 * pose.strideCompressX, 6);
+          ctx.fillStyle = armorLight;
+          ctx.fillRect(-6 - pose.hipOffsetX, leftLegY + leftLegHeight - 4, 3 * pose.strideCompressX, 4);
+          ctx.fillRect(3 + pose.hipOffsetX, rightLegY + rightLegHeight - 4, 3 * pose.strideCompressX, 4);
+
+          // Hip / codpiece block
+          ctx.fillStyle = armorDark;
+          ctx.fillRect(-6, -2 + pose.torsoLeanY, 12, 6);
+          ctx.fillStyle = armorLight;
+          ctx.fillRect(-2, -1 + pose.torsoLeanY, 4, 3);
           
-          // Torso
-          ctx.fillRect(-7, -15, 14, 16);
+          // Torso core
+          ctx.fillStyle = armorMid;
+          ctx.fillRect(-8 - pose.shoulderOffsetX, -17 + pose.torsoLeanY, 16 + pose.shoulderOffsetX * 2, 18);
+          ctx.fillStyle = armorDark;
+          ctx.fillRect(-5, -14 + pose.torsoLeanY, 10, 11);
+          ctx.fillStyle = armorLight;
+          ctx.fillRect(-7, -16 + pose.torsoLeanY, 14, 3);
+          ctx.fillRect(-7, -1 + pose.torsoLeanY, 14, 2);
           
-          // Yellow Detail (Belt or Number)
-          ctx.fillStyle = '#facc15';
+          // Chest details
           if (isBack) {
-            // Back detail (the "13" or similar)
-            ctx.fillRect(-2, -12, 4, 6);
+            ctx.fillStyle = armorJoint;
+            ctx.fillRect(-4, -12 + pose.torsoLeanY, 8, 7);
+            ctx.fillStyle = '#6ee7b7';
+            ctx.fillRect(-1, -9 + pose.torsoLeanY, 2, 2);
           } else {
-            // Front detail (Belt)
-            ctx.fillRect(-7, -5, 14, 3);
+            ctx.fillStyle = armorJoint;
+            ctx.fillRect(-5, -12 + pose.torsoLeanY, 10, 6);
+            ctx.fillStyle = '#d4af37';
+            ctx.fillRect(-1, -10 + pose.torsoLeanY, 2, 2);
+            ctx.fillStyle = '#f97316';
+            ctx.fillRect(-4, -7 + pose.torsoLeanY, 2, 1);
+            ctx.fillRect(2, -7 + pose.torsoLeanY, 2, 1);
           }
+
+          // Shoulder pauldrons
+          ctx.fillStyle = armorMid;
+          ctx.beginPath();
+          ctx.ellipse(-9 - pose.shoulderOffsetX, -13 + pose.torsoLeanY, 5, 4, -0.2, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.beginPath();
+          ctx.ellipse(9 + pose.shoulderOffsetX, -13 + pose.torsoLeanY, 5, 4, 0.2, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = armorLight;
+          ctx.fillRect(-12 - pose.shoulderOffsetX, -15 + pose.torsoLeanY, 4, 2);
+          ctx.fillRect(8 + pose.shoulderOffsetX, -15 + pose.torsoLeanY, 4, 2);
           
           // Arms
-          ctx.fillStyle = '#1e3a8a';
-          const armAngle = entity.isMoving ? Math.sin(time * 15) * 0.5 : 0.2;
           ctx.save();
-          ctx.rotate(armAngle);
-          ctx.fillRect(6, -14, 4, 12); // Right arm
+          ctx.rotate(pose.rightArmAngle);
+          ctx.fillStyle = armorJoint;
+          ctx.fillRect(7 + pose.shoulderOffsetX, -12 + pose.torsoLeanY, 4, 12); // Right arm
+          ctx.fillStyle = armorMid;
+          ctx.fillRect(6 + pose.shoulderOffsetX, -14 + pose.torsoLeanY, 5, 6);
+          ctx.fillStyle = armorLight;
+          ctx.fillRect(7 + pose.shoulderOffsetX, -3 + pose.torsoLeanY, 4, 2);
           ctx.restore();
           
           ctx.save();
-          ctx.rotate(-armAngle);
-          ctx.fillRect(-10, -14, 4, 12); // Left arm
+          ctx.rotate(pose.leftArmAngle);
+          ctx.fillStyle = armorJoint;
+          ctx.fillRect(-11 - pose.shoulderOffsetX, -12 + pose.torsoLeanY, 4, 12); // Left arm
+          ctx.fillStyle = armorMid;
+          ctx.fillRect(-11 - pose.shoulderOffsetX, -14 + pose.torsoLeanY, 5, 6);
+          ctx.fillStyle = armorLight;
+          ctx.fillRect(-11 - pose.shoulderOffsetX, -3 + pose.torsoLeanY, 4, 2);
           ctx.restore();
 
-          // Head
-          ctx.fillStyle = '#fde68a'; // Skin tone
+          // Helmet / head
+          const hx = pose.headOffsetX;
+          const hy = -23 + pose.headOffsetY + pose.torsoLeanY;
+          ctx.fillStyle = armorDark;
           ctx.beginPath();
-          ctx.arc(0, -22, 6, 0, Math.PI * 2);
+          ctx.ellipse(hx, hy, 7, 7, 0, 0, Math.PI * 2);
           ctx.fill();
-          
-          if (!isBack) {
-            // Eyes
-            ctx.fillStyle = '#111827';
-            ctx.fillRect(1, -23, 2, 2);
-            ctx.fillRect(4, -23, 2, 2);
-          }
-          
-          // Hair/Helmet (Black)
-          ctx.fillStyle = '#111827';
+          ctx.fillStyle = armorMid;
+          ctx.beginPath();
+          ctx.ellipse(hx, hy - 1, 6, 5, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = armorLight;
+          ctx.fillRect(hx - 4, hy - 6, 6, 2);
+          ctx.fillRect(hx - 6, hy - 1, 2, 3);
           if (isBack) {
-            // Back hair covers more
-            ctx.beginPath();
-            ctx.arc(0, -22, 6, -Math.PI * 0.2, Math.PI * 1.2);
-            ctx.fill();
+            ctx.fillStyle = armorJoint;
+            ctx.fillRect(hx - 4, hy, 8, 4);
+            ctx.fillStyle = '#16a34a';
+            ctx.fillRect(hx - 1, hy + 1, 2, 1);
           } else {
-            // Front hair (Fringe)
-            ctx.beginPath();
-            ctx.arc(0, -24, 6, Math.PI, Math.PI * 2);
-            ctx.fill();
-            ctx.fillRect(-6, -24, 12, 4);
+            ctx.fillStyle = armorJoint;
+            ctx.fillRect(hx - 4, hy - 1, 8, 3);
+            ctx.fillStyle = visorGlow;
+            ctx.fillRect(hx + 1, hy - 1, 3, 1);
+            if (!isLeft) {
+              ctx.fillRect(hx + 3, hy - 2, 1, 1);
+            }
           }
           
         } else {
@@ -566,8 +609,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onTileClick, 
       if (rect) {
         const screenX = e.clientX - rect.left;
         const screenY = e.clientY - rect.top;
-        const x = screenX - offset.x;
-        const y = screenY - offset.y;
+        const x = (screenX - offset.x) / zoom;
+        const y = (screenY - offset.y) / zoom;
         const grid = screenToGrid(x, y);
         
         longPressTimer.current = setTimeout(() => {

@@ -1,16 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { GoogleGenAI } from "@google/genai";
 import { GameCanvas } from './components/GameCanvas';
 import { FalloutHUD } from './components/FalloutHUD';
 import { ContextMenu } from './components/ContextMenu';
 import { Inventory } from './components/Inventory';
 import { EntityDetailModal } from './components/EntityDetailModal';
 import { LevelUpModal } from './components/LevelUpModal';
-import { SpriteEditor } from './components/SpriteEditor';
+import { SpriteEditor, generateNeuralLinkSprite, isNeuralLinkConfigured } from './features/neural-link';
 import { Entity, GameState, Point, MapObject, Item, WorldItem } from './game/types';
 import { getPath, calculateHitChance, calculateDamage } from './game/engine';
-
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 const INITIAL_ENTITIES: Entity[] = [
   {
@@ -855,44 +852,12 @@ export default function App() {
     }));
   };
 
-  const removeWhiteBackground = async (base64Data: string): Promise<string> => {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.crossOrigin = "anonymous";
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = img.width;
-        canvas.height = img.height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          resolve(base64Data.startsWith('data:') ? base64Data : `data:image/png;base64,${base64Data}`);
-          return;
-        }
-        ctx.drawImage(img, 0, 0);
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const data = imageData.data;
-        
-        // Target white background
-        const threshold = 240; 
-        for (let i = 0; i < data.length; i += 4) {
-          const r = data[i];
-          const g = data[i + 1];
-          const b = data[i + 2];
-          // If pixel is near white, make it transparent
-          if (r > threshold && g > threshold && b > threshold) {
-            data[i + 3] = 0;
-          }
-        }
-        ctx.putImageData(imageData, 0, 0);
-        resolve(canvas.toDataURL('image/png'));
-      };
-      img.onerror = () => resolve(base64Data.startsWith('data:') ? base64Data : `data:image/png;base64,${base64Data}`);
-      img.src = base64Data.startsWith('data:') ? base64Data : `data:image/png;base64,${base64Data}`;
-    });
-  };
-
   const generateSkins = useCallback(async (targetEntityId?: string) => {
     if (isGeneratingSkins) return;
+    if (!isNeuralLinkConfigured()) {
+      addLog('Pip-Boy: Gemini API key not configured. Visual generation is disabled.');
+      return;
+    }
     setIsGeneratingSkins(true);
 
     const entitiesToUpdate = targetEntityId 
@@ -908,38 +873,7 @@ export default function App() {
 
     try {
       const entity = entitiesToUpdate[0];
-      const prompt = `Isometric 2D character sprite sheet for a post-apocalyptic RPG. 
-      Subject: ${entity.name} - ${entity.basePrompt || entity.subType}.
-      Locomotion: ${entity.movementType || 'bipedal'}.
-      Format: 4 cardinal directions (Front, Back, Left, Right) arranged in a 2x2 grid.
-      Style: Gritty 90s pixel art, Fallout 1 aesthetic, high contrast, sharp edges.
-      Background: SOLID PURE WHITE BACKGROUND. NO LANDSCAPE. NO SEA. NO ROCKS. JUST THE CHARACTER ON WHITE.
-      The character should be centered in each quadrant.`;
-
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-image',
-        contents: [{ parts: [{ text: prompt }] }],
-        config: {
-          imageConfig: {
-            aspectRatio: "1:1",
-          }
-        }
-      });
-
-      let base64Image = '';
-      for (const part of response.candidates?.[0]?.content?.parts || []) {
-        if (part.inlineData) {
-          base64Image = part.inlineData.data;
-          break;
-        }
-      }
-
-      if (!base64Image) {
-        throw new Error("No image data received from model");
-      }
-
-      // Process image to remove white background
-      const transparentSpriteUrl = await removeWhiteBackground(base64Image);
+      const transparentSpriteUrl = await generateNeuralLinkSprite(entity);
 
       setGameState(prev => ({
         ...prev,
@@ -1154,6 +1088,7 @@ export default function App() {
           entities={gameState.entities}
           onClose={toggleSpriteEditor}
           onUpdateSprite={handleUpdateSprite}
+          onUpdateEntity={handleUpdateEntity}
           onRegenerate={generateSkins}
           isGenerating={isGeneratingSkins}
         />
