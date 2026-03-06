@@ -1,20 +1,44 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Local Run and Tests
 
-# Run and deploy your AI Studio app
+## Prerequisites
 
-This contains everything you need to run your app locally.
+- Node.js
+- npm
 
-View your app in AI Studio: https://ai.studio/apps/e70b26f7-93fa-4ef3-8b22-ddc5ed717cf6
-
-## Run Locally
-
-**Prerequisites:**  Node.js
-
+## Local Setup
 
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+2. Configure env vars (if AI features are used):
+   `cp .env.example .env.local`
+   then set `GEMINI_API_KEY` in `.env.local`
+
+## Run Locally
+
+- Start dev server (port 3000):
+  `npm run dev`
+- Build production bundle:
+  `npm run build`
+- Preview built app locally:
+  `npm run preview`
+
+## Tests and Checks
+
+- Type check (no emit):
+  `npm run lint`
+- Run unit tests:
+  `npm test`
+
+## Available Local URLs (Dev Server)
+
+With `npm run dev`, open:
+
+- `http://localhost:3000/` - Main app entry (`App`)
+- `http://localhost:3000/tile-lab.html` - Tile lab tools and tile workflow
+- `http://localhost:3000/wall-lab.html` - Wall lab tools and wall workflow
+- `http://localhost:3000/animation-preview.html` - Animation preview page
+- `http://localhost:3000/dev-level-editor.html` - Dev level editor
+- `http://localhost:3000/dev-level-preview.html` - Dev level preview
+- `http://localhost:3000/dev-character-editor.html` - Dev character editor
+- `http://localhost:3000/dev-character-preview.html` - Dev character preview
+- `http://localhost:3000/dev-systems.html` - Dev systems reference
