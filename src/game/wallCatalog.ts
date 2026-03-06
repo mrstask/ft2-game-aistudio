@@ -4,7 +4,8 @@ export type WallFamily =
   | 'scrap'
   | 'concrete'
   | 'vault'
-  | 'adobe';
+  | 'adobe'
+  | 'ruins';
 
 export interface WallTypeDef {
   id: string;
@@ -39,9 +40,17 @@ export const FALLOUT2_WALL_TYPES: WallTypeDef[] = [
   { id: 'adobe-plaster', family: 'adobe', label: 'Adobe Plaster Wall', height: 38, tags: ['adobe', 'plaster'] },
   { id: 'adobe-cracked', family: 'adobe', label: 'Adobe Wall (Cracked)', height: 38, tags: ['adobe', 'cracked'] },
   { id: 'adobe-reinforced', family: 'adobe', label: 'Adobe Wall (Reinforced)', height: 40, tags: ['adobe', 'reinforced'] },
+
+  // Fallout-like masonry ruins set (base + variants)
+  { id: 'ruins-stone-plain', family: 'ruins', label: 'Ruins Stone (Plain)', height: 40, tags: ['stone', 'ruins', 'masonry'] },
+  { id: 'ruins-stone-cracked', family: 'ruins', label: 'Ruins Stone (Cracked)', height: 40, tags: ['stone', 'ruins', 'cracked'] },
+  { id: 'ruins-stone-moss', family: 'ruins', label: 'Ruins Stone (Moss)', height: 40, tags: ['stone', 'ruins', 'moss'] },
+  { id: 'ruins-stone-engraved', family: 'ruins', label: 'Ruins Stone (Engraved)', height: 40, tags: ['stone', 'ruins', 'engraved'] },
+  { id: 'ruins-archway', family: 'ruins', label: 'Ruins Archway', height: 40, tags: ['stone', 'ruins', 'archway'] },
+  { id: 'ruins-archway-wide', family: 'ruins', label: 'Ruins Archway (Double)', height: 40, tags: ['stone', 'ruins', 'archway', 'double'] },
 ];
 
-export const WALL_FAMILY_ORDER: WallFamily[] = ['tin', 'wood', 'scrap', 'concrete', 'vault', 'adobe'];
+export const WALL_FAMILY_ORDER: WallFamily[] = ['ruins', 'tin', 'wood', 'scrap', 'concrete', 'vault', 'adobe'];
 
 export function getWallTypesByFamily(family: WallFamily): WallTypeDef[] {
   return FALLOUT2_WALL_TYPES.filter((wall) => wall.family === family);

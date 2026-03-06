@@ -39,6 +39,10 @@ export const FalloutHUD: React.FC<FalloutHUDProps> = ({
   onSpriteEditorToggle
 }) => {
   const equippedWeapon = player.equipment?.weapon;
+  const openLevelEditor = () => {
+    onDevModeToggle?.();
+    window.location.href = '/dev-level-editor.html';
+  };
 
   return (
     <div className="fixed bottom-0 left-0 right-0 h-40 bg-[#2a2a24] border-t-4 border-[#3a3a34] flex items-center px-4 gap-4 z-30 shadow-[0_-10px_30px_rgba(0,0,0,0.8)]">
@@ -217,11 +221,12 @@ export const FalloutHUD: React.FC<FalloutHUDProps> = ({
         {/* System Buttons */}
         <div className="grid grid-cols-1 gap-1 w-12">
           <button 
-            onClick={onDevModeToggle}
+            onClick={openLevelEditor}
             className={cn(
               "h-6 border border-[#4a4a44] text-[8px] font-bold rounded transition-colors",
               devMode ? "bg-[#4ade80] text-black border-[#4ade80]" : "bg-[#3a3a34] text-white hover:bg-[#4a4a44]"
             )}
+            title="Open Level Editor"
           >
             DEV
           </button>
@@ -233,9 +238,15 @@ export const FalloutHUD: React.FC<FalloutHUDProps> = ({
               SPR
             </button>
           )}
-          <button className="h-6 bg-[#3a3a34] border border-[#4a4a44] text-[8px] text-white font-bold rounded hover:bg-[#4a4a44]">MAP</button>
-          <button className="h-6 bg-[#3a3a34] border border-[#4a4a44] text-[8px] text-white font-bold rounded hover:bg-[#4a4a44]">CHA</button>
-          <button className="h-6 bg-[#3a3a34] border border-[#4a4a44] text-[8px] text-white font-bold rounded hover:bg-[#4a4a44]">PIP</button>
+          <a href="/dev-level-editor.html" className="h-6 bg-[#3a3a34] border border-[#4a4a44] text-[8px] text-white font-bold rounded hover:bg-[#4a4a44] flex items-center justify-center">
+            MAP
+          </a>
+          <a href="/dev-character-editor.html" className="h-6 bg-[#3a3a34] border border-[#4a4a44] text-[8px] text-white font-bold rounded hover:bg-[#4a4a44] flex items-center justify-center">
+            CHA
+          </a>
+          <a href="/dev-systems.html" className="h-6 bg-[#3a3a34] border border-[#4a4a44] text-[8px] text-white font-bold rounded hover:bg-[#4a4a44] flex items-center justify-center">
+            PIP
+          </a>
         </div>
       </div>
     </div>
